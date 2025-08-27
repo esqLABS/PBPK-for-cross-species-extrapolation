@@ -49,7 +49,7 @@ The main steps of the workflow are handled by `Workflow.R`, which calls a series
 All of those helper scripts are situated in the `Code`folder. 
 
 ---
-
+![R workflow](Framework.png)
 **Figure S1.** Visual representation of the R workflow for the species extrapolation scenarios  
 
 ---
