@@ -1,0 +1,280 @@
+---
+title: "Fit and Extrapolation report"
+format: 
+  html:
+    toc: true
+    toc-location: left
+    toc-float: true
+    embed-resources: true
+editor: visual
+params:
+  folder: ""
+  datasetPath: ""
+  compounds_vec: ""
+  renallyCleared: ""
+---
+
+```{r setup, echo = FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r libraries}
+# Load your libraries here
+library(dplyr)
+library(stringr)
+library(purrr)
+library(tidyr)
+library(readr)
+library(fs)
+library(knitr)
+library(kableExtra)
+```
+
+```{r data}
+# Define the extrapolation folder on which you want to generate a report
+PIFolder <- params$folder
+
+# Get the compounds and species automatically from the documents in results
+file_list <- dir_ls(file.path(PIFolder, "PIResults"), recurse = FALSE, glob = "*.csv")
+file_names <- basename(file_list)
+base_names <- path_ext_remove(file_names)
+
+species <- unique(sapply(strsplit(base_names, "_"), `[`, 1))
+compounds <- unique(sapply(strsplit(base_names, "_"), `[`, 2))
+
+# Detect estimated parameters
+firstFile <- read_csv(file_list[1])
+fitLipo <- "estimatedLipo" %in% colnames(firstFile)
+
+renallyCleared <- params$renallyCleared
+```
+
+## Metadata of the fit and extrapolation
+
+The fit and extrapolation were performed on the dataset located there: `r params$datasetPath`.
+
+For the fitting part, the plasma clearance is fitted, and the lipophilicity is `r if (fitLipo) "fitted" else "not fitted"`.
+
+The folder on which the different results can be found is "`r PIFolder`".
+
+## Fit Results
+
+Here are the tables displaying the fitter values. Lipophilicity in log Units, and KP can mean Plasma Clearance (l/min/kg) or GFR fraction for renally cleared compounds.
+
+```{r retrive fit results}
+# Function to extract the calculation method from the file name
+read_specific_partition_coef <- function(file_path) {
+  # Read the CSV file
+  data <- read_csv(file_path)
+  
+  # Find the row with the lowest objectiveAfter value and extract the PartitionCoef
+  specific_partition_coef <- data %>%
+    filter(objectiveAfter == min(objectiveAfter, na.rm = TRUE)) %>%
+    select(PartitionCoef) %>%
+    pull()
+  
+  return(specific_partition_coef)
+}
+
+return_fit_results <- function(file_path) {
+  # Read the CSV file
+  data <- read_csv(file_path)
+  
+  # Find the row with the lowest objectiveAfter value and extract the PartitionCoef
+  if (!(unique(data$Compound) %in% renallyCleared)) {
+    fit_results <- data %>%
+      filter(objectiveAfter == min(objectiveAfter, na.rm = TRUE)) %>%
+      select(Compound, Species, estimatedLipo, estimatedPlasmaClearance, objectiveAfter)
+  } else {
+    fit_results <- data %>%
+      filter(objectiveAfter == min(objectiveAfter, na.rm = TRUE)) %>%
+      select(Compound, Species, estimatedLipo, estimatedGFR, objectiveAfter)
+  }
+  return(fit_results)
+}
+
+Partition_df <- data.frame(FileName = character(), PartitionCoef = numeric(), stringsAsFactors = FALSE)
+
+# Iterate over the list of files
+for (file_path in file_list) {
+  # Extract the file name without extension
+  file_name <- path_ext_remove(path_file(file_path))
+  
+  # Read the specific PartitionCoef from the CSV file
+  specific_partition_coef <- read_specific_partition_coef(file_path)
+  
+  # Append the result to the data frame
+  Partition_df <- rbind(Partition_df, data.frame(FileName = file_name, PartitionCoef = specific_partition_coef))
+}
+
+png_folder <- file.path(PIFolder, "PIResults", "Plots")
+png_list <- dir_ls(png_folder, recurse = FALSE, glob = "*.png")
+png_names <- basename(png_list)
+
+# Create function to construct plots legend
+extract_details <- function(file_name) {
+  parts <- strsplit(file_name, "_")[[1]]
+  species <- parts[1]
+  compound <- parts[2]
+  partition_coef <- parts[3]
+  dose <- paste(parts[4:length(parts)], collapse = "_")  # Combine dose parts
+  dose <- sub("\\.png$", "", dose)  # Remove the file extension from the last part
+  return(c(species, compound, partition_coef, dose))
+}
+
+extrapolation_folder <- file.path(PIFolder, "ExtrapolationResults", "Plots")
+extrapolation_list <- sub("\\.jpg$", "", basename(dir_ls(extrapolation_folder, recurse = FALSE, glob = "*.jpg")))
+
+metric_list <- sub("\\.png$", "", basename(dir_ls(extrapolation_folder, recurse = FALSE, glob = "*.png")))
+```
+
+```{r fit table}
+# For each couple compound/species, get the best calculation method
+# Read the list of files in the Results folder
+lipo.dtf <- data.frame(Compound = character(), Species = character(), Lipo = numeric(), stringsAsFactors = FALSE)
+KP.dtf <- data.frame(Compound = character(), Species = character(), KP = numeric(), stringsAsFactors = FALSE)
+
+# Iterate over the list of files
+for (file_path in file_list) {
+  # Read the specific PartitionCoef from the CSV file
+  fit_results <- return_fit_results(file_path)
+  
+  # Append the result to the data frame
+  lipo.dtf <- rbind(
+    lipo.dtf,
+    data.frame(
+      Compound = fit_results$Compound,
+      Species = fit_results$Species,
+      Lipo = fit_results$estimatedLipo
+    )
+  )
+  
+  KP.dtf <- rbind(
+    KP.dtf,
+    data.frame(
+      Compound = fit_results$Compound,
+      Species = fit_results$Species,
+      KP = ifelse(
+        fit_results$Compound %in% renallyCleared,
+        fit_results$estimatedGFR, 
+        fit_results$estimatedPlasmaClearance
+      )
+    )
+  )
+}
+
+lipo_wide <- lipo.dtf %>%
+  pivot_wider(names_from = Species, values_from = Lipo)
+
+# Set row names to Compound
+lipo_wide <- as.data.frame(lipo_wide)
+rownames(lipo_wide) <- lipo_wide$Compound
+lipo_wide <- lipo_wide %>% select(-Compound)
+
+# Display the table with kableExtra
+kable(
+  lipo_wide,
+  format = "html",
+  table.attr = "style='width:50%;'",
+  caption = "Values of fitted Lipophilicity per compound and species (log Units)"
+) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+KP_wide <- KP.dtf %>%
+  pivot_wider(names_from = Species, values_from = KP)
+
+# Set row names to Compound
+KP_wide <- as.data.frame(KP_wide)
+rownames(KP_wide) <- KP_wide$Compound
+KP_wide <- KP_wide %>% select(-Compound)
+
+# Display the table with kableExtra
+kable(
+  KP_wide,
+  format = "html",
+  table.attr = "style='width:50%;'",
+  caption = "Values of fitted KP per compound and species (Plasma clearance in l/min/kg or GFR)"
+) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+```{r Compounds, results='asis'}
+compound_vec <- params$compounds_vec
+for (compoundID in compound_vec) {
+  cat(paste0("### ", compoundID, "\n"))
+  cat(paste0("Here are the fitted curves for ", compoundID, "\n"))
+  
+  for (i in seq_len(nrow(Partition_df))) {
+    file_name <- paste0(Partition_df$FileName[i], "_", Partition_df$PartitionCoef[i])
+    matching_pngs <- png_names[grep(paste0("^", file_name), png_names)]
+    
+    # Embed the PNG if it exists
+    for (png_file in matching_pngs) {
+      details <- extract_details(png_file)
+      species <- details[1]
+      compound <- details[2]
+      partition_coef <- details[3]
+      dose <- details[4]
+      
+      legend <- paste(
+        "Fit plot for", compound, "on", species, "for the dose", dose,
+        "with the selected calculation method for partition coefficient:", partition_coef
+      )
+      
+      png_path <- file.path(png_folder, png_file)
+    
+      if (compound == compoundID) {
+        cat(paste0("<p>", legend, "</p>"))
+        cat(paste0('<img src="',png_path, '" width="800px" />', "\n\n"))
+      }
+    }
+  }
+}
+```
+
+## Extrapolation Results
+
+Here are the Extrapolations Results
+
+```{r}
+metrics <- read.csv(file = file.path(PIFolder, "ExtrapolationResults", "metrics_summary.csv"))
+
+n_extrapol <- metrics %>% filter(Extrapolation != "Fitted") %>% group_by(specieTo, specieFrom, Extrapolation, compoundID) %>% n_groups()
+```
+
+A total of `r n_extrapol` were done.
+
+### Curves
+
+```{r Compounds extrapolation, results='asis'}
+for (compoundID in compound_vec) {
+  cat(paste0("#### ", compoundID, "\n"))
+  
+  # Embed the PNG if it exists
+  for (extrapolation in extrapolation_list) {
+    split_extrapolation <- strsplit(extrapolation, "_")
+    species <- split_extrapolation[[1]][1]
+    compound <- split_extrapolation[[1]][2]
+    legend <- paste("Extrapolation plot for", compound, "to", species)
+  
+    png_path <- file.path(extrapolation_folder, paste0(extrapolation, ".jpg"))
+    
+    if (compound == compoundID) {
+      cat(paste0("<p>", legend, "</p>"))
+      cat(paste0('<img src="', png_path, '" width="900px" />', "\n\n"))
+    }
+  }
+}
+```
+
+### Metrics comparisons
+
+Let's compare the different metrics
+
+```{r Metrics extrapolation, results='asis'}
+# Embed the PNG if it exists
+for (metric in metric_list) {
+  png_path <- file.path(extrapolation_folder, paste0(metric, ".png"))
+  cat(paste0('<img src="',  png_path, '" width="900px"/>', "\n\n"))
+}
+```
