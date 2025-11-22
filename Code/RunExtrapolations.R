@@ -3,7 +3,7 @@ source("Code/ExtractInVivoDataAdmins.R")
 
 #' @import dplyr
 #' @import ggplot2
-runExtrapolations <- function(projectConfiguration, inVivoData, saveSimulations = TRUE, yAxisScale = "log") {
+runExtrapolations <- function(projectConfiguration, inVivoData, saveSimulations = TRUE, yAxisScale = "log", manuscript = FALSE) {
   projectConfigExtrapol <- projectConfiguration$clone()
   projectConfigExtrapol$scenarioDefinitionFile <- "ScenariosExtrapolation.xlsx"
   projectConfigExtrapol$paramsFile <- file.path(
@@ -229,72 +229,163 @@ runExtrapolations <- function(projectConfiguration, inVivoData, saveSimulations 
         StudyID = str_split(DataSet, pattern = "_", simplify = TRUE, n = 2)[, 1]
       )
 
-      # plot of myDataCombinedPlot Naive versus others extrapolation
-      plot <- ggplot(
-        data = myDataCombinedPlot %>%
-          filter(
-            .data[["dataType"]] == "simulated",
-            !(.data[["extrapolation"]] %in% c("Naive", "obs", "Fitted"))
-          ),
-        mapping = aes(x = xValues, y = yValues)
-      ) +
-        # Observed data points (larger)
-        geom_point(
-          data = myDataCombinedPlot %>%
-            filter(.data[["dataType"]] == "observed") %>%
-            select(-extrapolation),
-          aes(shape = `Study Id`),
-          size = 3,
-          alpha = 1
-        ) +
-        # Naive extrapolation lines
-        geom_line(
+      if (isTRUE(manuscript)) {
+        # plot of myDataCombinedPlot Naive versus others extrapolation
+        plot <- ggplot(
           data = myDataCombinedPlot %>%
             filter(
               .data[["dataType"]] == "simulated",
-              extrapolation == "Naive"
-            ) %>%
-            select(-extrapolation),
-          aes(linetype = "Naive", color = species_from),
-          size = 1.2
+              !(.data[["extrapolation"]] %in% c("Naive", "obs", "Fitted"))
+            ),
+          mapping = aes(x = xValues, y = yValues)
         ) +
-
-        # Extrapolated lines with increased line width
-        geom_line(
-          aes(linetype = "Extrapolated", color = species_from),
-          size = 1.2
-        ) +
-        facet_grid(~ extrapolation, drop = TRUE) +
-        scale_color_brewer(palette = "Set2") +
-        ggnewscale::new_scale_color() +
-        # Fitted lines
-        geom_line(
+          # Observed data points (larger)
+          geom_point(
+            data = myDataCombinedPlot %>%
+              filter(.data[["dataType"]] == "observed") %>%
+              select(-extrapolation),
+            aes(shape = `Study Id`),
+            size = 3,
+            alpha = 1
+          ) +
+          guides(shape = guide_legend(order = 1)) +
+          # Naive extrapolation lines
+          geom_line(
+            data = myDataCombinedPlot %>%
+              filter(
+                .data[["dataType"]] == "simulated",
+                extrapolation == "Naive"
+              ) %>%
+              select(-extrapolation),
+            aes(linetype = interaction("Naive", species_from), color = interaction("Naive", species_from)),
+            size = 1.2
+          ) +
+          # Extrapolated lines with increased line width
+          geom_line(
+            aes(linetype = interaction("Extrapolated", species_from), color = interaction("Extrapolated", species_from)),
+            size = 1.2
+          ) +
+          facet_grid(~ extrapolation, drop = TRUE) +
+          scale_color_manual(values = c("Naive.Mouse" = palette.colors(palette = "Set 2")[1], "Naive.Rat" = palette.colors(palette = "Set 2")[2], "Naive.Rabbit" = palette.colors(palette = "Set 2")[3],
+                                       "Extrapolated.Mouse" = palette.colors(palette = "Set 2")[1], "Extrapolated.Rat" = palette.colors(palette = "Set 2")[2], "Extrapolated.Rabbit" = palette.colors(palette = "Set 2")[3]),
+                             label = c("Naive.Mouse" = "Naive from Mouse", "Naive.Rat" = "Naive from Rat", "Naive.Rabbit" = "Naive from Rabbit",
+                                       "Extrapolated.Mouse" = "Extrapolated from Mouse", "Extrapolated.Rat" = "Extrapolated from Rat", "Extrapolated.Rabbit" = "Extrapolated from Rabbit"),
+                             name = NULL,
+                             drop = TRUE, guide = guide_legend(nrow = 2, byrow = TRUE)) +
+          labs(color = NULL) +
+          ggnewscale::new_scale_color() +
+          # Fitted lines
+          geom_line(
+            data = myDataCombinedPlot %>%
+              filter(
+                .data[["dataType"]] == "simulated",
+                extrapolation == "Fitted"
+              ) %>%
+              select(-extrapolation),
+            aes(color = "Fitted"),
+            size = 1.2,
+            alpha = 0.8
+          ) +
+          scale_colour_manual(values = c("Fitted" = palette.colors(palette = "Set 2")[c("Mouse" = 1, "Rat" = 2, "Rabbit" = 3)[speciesTo]]), name = NULL, guide = guide_legend(order = 2)) +
+          scale_linetype_manual(values = c("Naive.Mouse" = "solid", "Naive.Rat" = "solid", "Naive.Rabbit" = "solid",
+                                           "Extrapolated.Mouse" = "dashed", "Extrapolated.Rat" = "dashed", "Extrapolated.Rabbit" = "dashed"),
+                                label = c("Naive.Mouse" = "Naive from Mouse", "Naive.Rat" = "Naive from Rat", "Naive.Rabbit" = "Naive from Rabbit",
+                                          "Extrapolated.Mouse" = "Extrapolated from Mouse", "Extrapolated.Rat" = "Extrapolated from Rat", "Extrapolated.Rabbit" = "Extrapolated from Rabbit"),
+                                name = NULL,
+                                drop = TRUE,
+                                guide_legend(nrow = 2, byrow = TRUE)) +
+          scale_x_continuous(breaks = scales::pretty_breaks(n = 3)) +
+          theme_minimal(base_size = 14) + # increased base size for texts
+          labs(
+            title = paste0("Compound: ", compoundID, "; Species: ", speciesTo, "; Organ: ", organ, "; Compartment: ", compartment),
+            x = "Time (h)", y = "Concentration (µg/l)",
+            shape = NULL
+          ) +
+          theme(
+            legend.position = "bottom",
+            legend.key.width = unit(3, "line") ,
+            axis.text.x = element_text(angle = 45, hjust = 1), # rotated labels
+            panel.grid.major = element_line(color = "grey85"), # lighter grid lines
+            panel.grid.minor = element_blank()
+          )
+          # +
+          # ggtitle(paste(route, dose, organ, compartment))
+      } else {
+        # plot of myDataCombinedPlot Naive versus others extrapolation
+        plot <- ggplot(
           data = myDataCombinedPlot %>%
             filter(
               .data[["dataType"]] == "simulated",
-              extrapolation == "Fitted"
-            ) %>%
-            select(-extrapolation),
-          aes(color = "Fitted"),
-          size = 1.2,
-          alpha = 0.8
+              !(.data[["extrapolation"]] %in% c("Naive", "obs", "Fitted"))
+            ),
+          mapping = aes(x = xValues, y = yValues)
         ) +
-        scale_colour_manual(values = c("Fitted" = "mediumpurple1")) +
-        scale_linetype_manual(values = c("Naive" = "solid", "Extrapolated" = "dashed")) +
-        scale_x_continuous(breaks = scales::pretty_breaks(n = 3)) +
-        theme_minimal(base_size = 14) + # increased base size for texts
-        labs(
-          title = paste("Compound:", compoundID, "; Species:", speciesTo, "; Organ:", organ, "; Compartment:", compartment),
-          x = "Time (h)", y = "Concentration (µg/l)"
-        ) +
-        theme(
-          legend.position = "bottom",
-          axis.text.x = element_text(angle = 45, hjust = 1), # rotated labels
-          panel.grid.major = element_line(color = "grey85"), # lighter grid lines
-          panel.grid.minor = element_blank()
-         )# +
+          # Observed data points (larger)
+          geom_point(
+            data = myDataCombinedPlot %>%
+              filter(.data[["dataType"]] == "observed") %>%
+              select(-extrapolation),
+            aes(shape = `Study Id`),
+            size = 3,
+            alpha = 1
+          ) +
+          # Naive extrapolation lines
+          geom_line(
+            data = myDataCombinedPlot %>%
+              filter(
+                .data[["dataType"]] == "simulated",
+                extrapolation == "Naive"
+              ) %>%
+              select(-extrapolation),
+            aes(linetype = "Naive", color = species_from),
+            size = 1.2
+          ) +
+          # Extrapolated lines with increased line width
+          geom_line(
+            aes(linetype = "Extrapolated", color = species_from),
+            size = 1.2
+          ) +
+          facet_grid(~ extrapolation, drop = TRUE) +
+          scale_color_brewer(palette = "Set2", name = "") +
+          labs(color = "") +
+          ggnewscale::new_scale_color() +
+          # Fitted lines
+          geom_line(
+            data = myDataCombinedPlot %>%
+              filter(
+                .data[["dataType"]] == "simulated",
+                extrapolation == "Fitted"
+              ) %>%
+              select(-extrapolation),
+            aes(color = "Fitted"),
+            size = 1.2,
+            alpha = 0.8
+          ) +
+          scale_colour_manual(
+            values = c("Fitted" = palette.colors(palette = "Set 2")[
+              1 + length(unique(myDataCombinedPlot %>% filter(dataType == "simulated", extrapolation == "Naive") %>% pull(species_from)))
+            ]),
+            name = "") +
+          scale_linetype_manual(values = c("Naive" = "solid", "Extrapolated" = "dashed"),
+                                name = "", drop = TRUE) +
+          scale_x_continuous(breaks = scales::pretty_breaks(n = 3)) +
+          theme_minimal(base_size = 14) + # increased base size for texts
+          labs(
+            title = paste0("Compound: ", compoundID, "; Species: ", speciesTo, "; Organ: ", organ, "; Compartment: ", compartment),
+            x = "Time (h)", y = "Concentration (µg/l)",
+            shape = ""
+          ) +
+          theme(
+            legend.position = "bottom",
+            legend.key.width = unit(3, "line") ,
+            axis.text.x = element_text(angle = 45, hjust = 1), # rotated labels
+            panel.grid.major = element_line(color = "grey85"), # lighter grid lines
+            panel.grid.minor = element_blank()
+          ) +
+          guides(color = guide_legend(nrow = 2), linetype = guide_legend(nrow = 2))
+        # +
         # ggtitle(paste(route, dose, organ, compartment))
-
+      }
 
       if (yAxisScale == "log") {
         plot <- plot + scale_y_log10()
